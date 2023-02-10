@@ -1,20 +1,35 @@
-use std::{env, fs, io::{Write, Read}};
+use std::{
+	env, fs,
+	io::{Read, Write},
+};
 
 fn main() {
 	let args: Vec<_> = env::args().collect();
-	if args.len() < 2 {
-		println!("Please spesify a filename");
+	if args.len() < 3 {
+		println!("Please spesify a mode and a filename");
+		println!("Valid modes: sort");
 		return;
 	}
-	let input_file = args[1].clone();
-	let output_file: String;
-	if args.len() > 2 {
-		output_file = args[2].clone();
-	} else {
-		output_file = input_file.clone() + ".sorted";
-	}
+	let input_file = args[2].clone();
 	println!("Reading {}...", &input_file);
 	let mut data = get_file_timestamps(&input_file).expect("Failed to read file");
+	match args[1].as_str() {
+		"sort" => {
+			mode_sort_data(&mut data, &args);
+		}
+		_ => {
+			println!("Invalid mode option");
+		}
+	}
+}
+
+fn mode_sort_data(data: &mut Vec<[f64; 2]>, args: &Vec<String>) {
+	let output_file: String;
+	if args.len() > 3 {
+		output_file = args[3].clone();
+	} else {
+		output_file = args[2].clone() + ".sorted";
+	}
 	println!("Sorting {} packet timestamps...", data.len());
 	data.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap());
 	println!(
@@ -30,12 +45,18 @@ fn get_file_timestamps(filename: &String) -> Option<Vec<[f64; 2]>> {
 	let mut file = fs::File::open(filename).ok()?;
 	let mut buffer: [u8; 8] = [0; 8];
 	loop {
-		let bytes_read = std::io::Read::by_ref(&mut file).take(8).read(&mut buffer).ok()?;
+		let bytes_read = std::io::Read::by_ref(&mut file)
+			.take(8)
+			.read(&mut buffer)
+			.ok()?;
 		if bytes_read < 8 {
 			break;
 		}
 		let transmit_time = f64::from_ne_bytes(buffer);
-		let bytes_read = std::io::Read::by_ref(&mut file).take(8).read(&mut buffer).ok()?;
+		let bytes_read = std::io::Read::by_ref(&mut file)
+			.take(8)
+			.read(&mut buffer)
+			.ok()?;
 		if bytes_read < 8 {
 			break;
 		}
