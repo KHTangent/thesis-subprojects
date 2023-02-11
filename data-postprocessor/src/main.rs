@@ -84,26 +84,22 @@ fn get_file_timestamps(filename: &String) -> Option<TrexData> {
 		arrival_times: vec![],
 	};
 	let mut file = fs::File::open(filename).ok()?;
-	let mut buffer: [u8; 8] = [0; 8];
+	const CHUNK_SIZE: usize = 512 * 512;
+	let mut buffer: [u8; CHUNK_SIZE] = [0; CHUNK_SIZE];
 	loop {
-		let bytes_read = std::io::Read::by_ref(&mut file)
-			.take(8)
+		let bytes_left = std::io::Read::by_ref(&mut file)
+			.take(CHUNK_SIZE.try_into().unwrap())
 			.read(&mut buffer)
 			.ok()?;
-		if bytes_read < 8 {
+		if bytes_left < 16 {
 			break;
 		}
-		let transmit_time = f64::from_ne_bytes(buffer);
-		let bytes_read = std::io::Read::by_ref(&mut file)
-			.take(8)
-			.read(&mut buffer)
-			.ok()?;
-		if bytes_read < 8 {
-			break;
+		for i in (0..bytes_left).step_by(16) {
+			let transmit_time = f64::from_ne_bytes(buffer[i..i + 8].try_into().unwrap());
+			let arrival_time = f64::from_ne_bytes(buffer[i + 8..i + 16].try_into().unwrap());
+			data.transmit_times.push(transmit_time);
+			data.arrival_times.push(arrival_time);
 		}
-		let arrival_time = f64::from_ne_bytes(buffer);
-		data.transmit_times.push(transmit_time);
-		data.arrival_times.push(arrival_time);
 	}
 	Some(data)
 }
