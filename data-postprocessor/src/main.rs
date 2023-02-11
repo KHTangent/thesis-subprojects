@@ -54,8 +54,8 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 			.x_axis(Axis::new().title("Arrival time (s)".into()))
 			.y_axis(Axis::new().title("Latency (µs)".into())),
 	);
-	if args.len() > 3 && args.last().unwrap().ends_with(".html") {
-		plot.write_html(args.last().unwrap());
+	if args.len() > 3 && args.last().unwrap().ends_with(".png") {
+		plot.write_image(args.last().unwrap(), plotly::ImageFormat::PNG, 1600, 1600, 1.5);
 	} else {
 		plot.show();
 	}
