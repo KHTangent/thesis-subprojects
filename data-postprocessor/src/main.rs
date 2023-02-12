@@ -4,7 +4,7 @@ use std::{
 	vec,
 };
 
-use plotly::{layout::Axis, Layout, Plot, Scatter};
+use plotters::prelude::*;
 
 struct TrexData {
 	pub transmit_times: Vec<f64>,
@@ -42,23 +42,42 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		data.arrival_times[i] = (data.arrival_times[i] - data.transmit_times[i]) * 1_000_000.0;
 		data.transmit_times[i] -= first_arrival;
 	}
-	let mut plot = Plot::new();
-	let trace =
-		Scatter::new(data.transmit_times, data.arrival_times).mode(plotly::common::Mode::Markers);
-	plot.add_trace(trace);
-	plot.set_layout(
-		Layout::new()
-			.title("<b>Packet latency</b>".into())
-			.height(800)
-			.width(800)
-			.x_axis(Axis::new().title("Arrival time (s)".into()))
-			.y_axis(Axis::new().title("Latency (µs)".into())),
-	);
+	let filename;
 	if args.len() > 3 && args.last().unwrap().ends_with(".png") {
-		plot.write_image(args.last().unwrap(), plotly::ImageFormat::PNG, 1600, 1600, 1.5);
+		filename = args.last().unwrap().clone();
 	} else {
-		plot.show();
+		filename = args[2].clone() + ".png";
 	}
+	let highest_latency = data
+		.arrival_times
+		.iter()
+		.reduce(|a, b| if a > b { a } else { b })
+		.unwrap()
+		.clone();
+	let lowest_latency = data
+		.arrival_times
+		.iter()
+		.reduce(|a, b| if a < b { a } else { b })
+		.unwrap()
+		.clone();
+	let root = BitMapBackend::new(&filename, (1600, 1600)).into_drawing_area();
+	root.fill(&WHITE).unwrap();
+	let mut chart = ChartBuilder::on(&root)
+		.set_label_area_size(LabelAreaPosition::Left, 40)
+		.set_label_area_size(LabelAreaPosition::Bottom, 40)
+		.caption("Latencies", ("sans-serif", 50).into_font())
+		.build_cartesian_2d(
+			data.transmit_times[0].round()..data.transmit_times.last().unwrap().round(),
+			(0.9 * lowest_latency)..(1.1 * highest_latency),
+		)
+		.unwrap();
+	chart.configure_mesh().draw().unwrap();
+	chart
+		.draw_series(
+			(0..data.transmit_times.len())
+				.map(|i| Circle::new((data.transmit_times[i], data.arrival_times[i]), 1, &GREEN)),
+		)
+		.unwrap();
 }
 
 fn mode_sort_data(data: &mut TrexData, args: &Vec<String>) {
