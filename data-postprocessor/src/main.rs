@@ -60,22 +60,34 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		.reduce(|a, b| if a < b { a } else { b })
 		.unwrap()
 		.clone();
-	let root = BitMapBackend::new(&filename, (1600, 1600)).into_drawing_area();
-	root.fill(&WHITE).unwrap();
+	println!(
+		"Packets range from {} to {}",
+		&lowest_latency, &highest_latency
+	);
+	let root = BitMapBackend::new(&filename, (2400, 1600)).into_drawing_area();
+	root.fill(&BLACK).unwrap();
 	let mut chart = ChartBuilder::on(&root)
-		.set_label_area_size(LabelAreaPosition::Left, 40)
-		.set_label_area_size(LabelAreaPosition::Bottom, 40)
-		.caption("Latencies", ("sans-serif", 50).into_font())
+		.set_label_area_size(LabelAreaPosition::Left, 160)
+		.set_label_area_size(LabelAreaPosition::Bottom, 100)
+		.caption("Latencies", ("sans-serif", 50).into_font().color(&WHITE))
+		.margin(10)
 		.build_cartesian_2d(
 			data.transmit_times[0].round()..data.transmit_times.last().unwrap().round(),
 			(0.9 * lowest_latency)..(1.1 * highest_latency),
 		)
 		.unwrap();
-	chart.configure_mesh().draw().unwrap();
+	chart
+		.configure_mesh()
+		.axis_style(&WHITE)
+		.label_style(("sans-serif", 32).into_font().color(&WHITE))
+		.x_desc("Transmit time (s)")
+		.y_desc("Latency (µs)")
+		.draw()
+		.unwrap();
 	chart
 		.draw_series(
 			(0..data.transmit_times.len())
-				.map(|i| Circle::new((data.transmit_times[i], data.arrival_times[i]), 1, &GREEN)),
+				.map(|i| Pixel::new((data.transmit_times[i], data.arrival_times[i]), &GREEN)),
 		)
 		.unwrap();
 }
