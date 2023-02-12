@@ -16,6 +16,9 @@ fn main() {
 	if args.len() < 3 {
 		println!("Please spesify a mode and a filename");
 		println!("Valid modes: sort, plot");
+		println!("Sort is currently broken");
+		println!("Plot usage: plot inputfile [c(seconds)] output.png");
+		println!("  Use c0.5 to cut 0.5 seconds of each side of the plot, to account for warmup/cooldown");
 		return;
 	}
 	let input_file = args[2].clone();
@@ -48,15 +51,30 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 	} else {
 		filename = args[2].clone() + ".png";
 	}
+	let start_at;
+	let end_at;
+	if args.len() > 3 && args[3].starts_with('c') {
+		let a = args[3][1..].parse::<f64>().unwrap_or(0.0);
+		start_at =
+			(data.transmit_times.len() as f64 * a / data.transmit_times.last().unwrap()) as usize;
+		end_at = data.transmit_times.len() - start_at;
+	} else {
+		start_at = 0;
+		end_at = data.transmit_times.len();
+	}
 	let highest_latency = data
 		.arrival_times
 		.iter()
+		.take(end_at)
+		.skip(start_at)
 		.reduce(|a, b| if a > b { a } else { b })
 		.unwrap()
 		.clone();
 	let lowest_latency = data
 		.arrival_times
 		.iter()
+		.take(end_at)
+		.skip(start_at)
 		.reduce(|a, b| if a < b { a } else { b })
 		.unwrap()
 		.clone();
@@ -70,9 +88,9 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		.set_label_area_size(LabelAreaPosition::Left, 160)
 		.set_label_area_size(LabelAreaPosition::Bottom, 100)
 		.caption("Latencies", ("sans-serif", 50).into_font().color(&WHITE))
-		.margin(10)
+		.margin(30)
 		.build_cartesian_2d(
-			data.transmit_times[0].round()..data.transmit_times.last().unwrap().round(),
+			data.transmit_times[start_at].round()-1.0..data.transmit_times[end_at - 1].round()+1.0,
 			(0.9 * lowest_latency)..(1.1 * highest_latency),
 		)
 		.unwrap();
@@ -86,7 +104,7 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		.unwrap();
 	chart
 		.draw_series(
-			(0..data.transmit_times.len())
+			(start_at..end_at)
 				.map(|i| Pixel::new((data.transmit_times[i], data.arrival_times[i]), &GREEN)),
 		)
 		.unwrap();
