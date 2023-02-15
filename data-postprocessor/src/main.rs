@@ -90,7 +90,8 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		.caption("Latencies", ("sans-serif", 50).into_font().color(&WHITE))
 		.margin(30)
 		.build_cartesian_2d(
-			data.transmit_times[start_at].round()-1.0..data.transmit_times[end_at - 1].round()+1.0,
+			data.transmit_times[start_at].round() - 1.0
+				..data.transmit_times[end_at - 1].round() + 1.0,
 			(0.9 * lowest_latency)..(1.1 * highest_latency),
 		)
 		.unwrap();
