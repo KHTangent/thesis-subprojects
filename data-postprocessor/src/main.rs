@@ -67,21 +67,34 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		.iter()
 		.take(end_at)
 		.skip(start_at)
-		.reduce(|a, b| if a > b { a } else { b })
-		.unwrap()
-		.clone();
+		.fold(f64::MIN, |a, b| a.max(*b));
 	let lowest_latency = data
 		.arrival_times
 		.iter()
 		.take(end_at)
 		.skip(start_at)
-		.reduce(|a, b| if a < b { a } else { b })
-		.unwrap()
-		.clone();
+		.fold(f64::MAX, |a, b| a.min(*b));
+	let average_latency: f64 = data
+		.arrival_times
+		.iter()
+		.take(end_at)
+		.skip(start_at)
+		.fold(0.0, |a, b| a + b)
+		/ data.arrival_times.len() as f64;
+	let variance = data
+		.arrival_times
+		.iter()
+		.take(end_at)
+		.skip(start_at)
+		.fold(0.0, |a, b| {
+			&a + (b - average_latency) * (b - average_latency)
+		}) / data.arrival_times.len() as f64;
+	let standard_deviation = variance.sqrt();
 	println!(
-		"Packets range from {} to {}",
-		&lowest_latency, &highest_latency
+		"Packets range from {} to {} µs, with an average of {} µs",
+		&lowest_latency, &highest_latency, &average_latency
 	);
+	println!("Standard deviation is {} µs", &standard_deviation);
 	let root = BitMapBackend::new(&filename, (2400, 1600)).into_drawing_area();
 	root.fill(&BLACK).unwrap();
 	let mut chart = ChartBuilder::on(&root)
@@ -145,8 +158,8 @@ fn get_file_timestamps(filename: &String) -> Option<TrexData> {
 			break;
 		}
 		for i in (0..bytes_left).step_by(16) {
-			let transmit_time = f64::from_ne_bytes(buffer[i..i + 8].try_into().unwrap());
-			let arrival_time = f64::from_ne_bytes(buffer[i + 8..i + 16].try_into().unwrap());
+			let transmit_time = f64::from_le_bytes(buffer[i..i + 8].try_into().unwrap());
+			let arrival_time = f64::from_le_bytes(buffer[i + 8..i + 16].try_into().unwrap());
 			data.transmit_times.push(transmit_time);
 			data.arrival_times.push(arrival_time);
 		}
