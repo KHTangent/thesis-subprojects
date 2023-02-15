@@ -11,13 +11,19 @@ struct TrexData {
 	pub arrival_times: Vec<f64>,
 }
 
+enum PlotMode {
+	Latency,
+	Jitter,
+}
+
 fn main() {
 	let args: Vec<_> = env::args().collect();
 	if args.len() < 3 {
 		println!("Please spesify a mode and a filename");
-		println!("Valid modes: sort, plot");
+		println!("Valid modes: sort, plot, plotj");
 		println!("Sort is currently broken");
-		println!("Plot usage: plot inputfile [c(seconds)] output.png");
+		println!("Plot usage: plot/plotj inputfile [c(seconds)] output.png");
+		println!("  plot is used to plot packet latencies, plotj for inter-packet times");
 		println!("  Use c0.5 to cut 0.5 seconds of each side of the plot, to account for warmup/cooldown");
 		return;
 	}
@@ -31,15 +37,16 @@ fn main() {
 			mode_sort_data(&mut data, &args);
 		}
 		"plot" => {
-			mode_plot_data(data, &args);
+			mode_plot_data(data, &args, PlotMode::Latency);
 		}
+		"plotj" => mode_plot_data(data, &args, PlotMode::Jitter),
 		_ => {
 			println!("Invalid mode option");
 		}
 	}
 }
 
-fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
+fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 	let first_arrival = data.transmit_times[0];
 	for i in 0..data.transmit_times.len() {
 		data.arrival_times[i] = (data.arrival_times[i] - data.transmit_times[i]) * 1_000_000.0;
@@ -62,13 +69,13 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		start_at = 0;
 		end_at = data.transmit_times.len();
 	}
-	let highest_latency = data
+	let mut highest_latency = data
 		.arrival_times
 		.iter()
 		.take(end_at)
 		.skip(start_at)
 		.fold(f64::MIN, |a, b| a.max(*b));
-	let lowest_latency = data
+	let mut lowest_latency = data
 		.arrival_times
 		.iter()
 		.take(end_at)
@@ -95,12 +102,41 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		&lowest_latency, &highest_latency, &average_latency
 	);
 	println!("Standard deviation is {} µs", &standard_deviation);
+
+	if let PlotMode::Jitter = mode {
+		let mut prev: f64;
+		let mut prev1: f64 = data.arrival_times[0];
+		for i in 1..data.arrival_times.len() {
+			prev = data.arrival_times[i].clone();
+			data.arrival_times[i] -= prev1;
+			prev1 = prev;
+		}
+		highest_latency = data
+			.arrival_times
+			.iter()
+			.take(end_at)
+			.skip(start_at)
+			.fold(f64::MIN, |a, b| a.max(*b));
+		lowest_latency = data
+			.arrival_times
+			.iter()
+			.take(end_at)
+			.skip(start_at)
+			.fold(f64::MAX, |a, b| a.min(*b));
+	}
+
 	let root = BitMapBackend::new(&filename, (2400, 1600)).into_drawing_area();
 	root.fill(&BLACK).unwrap();
 	let mut chart = ChartBuilder::on(&root)
 		.set_label_area_size(LabelAreaPosition::Left, 160)
 		.set_label_area_size(LabelAreaPosition::Bottom, 100)
-		.caption("Latencies", ("sans-serif", 50).into_font().color(&WHITE))
+		.caption(
+			match mode {
+				PlotMode::Latency => "Latencies",
+				PlotMode::Jitter => "Inter-packet times",
+			},
+			("sans-serif", 50).into_font().color(&WHITE),
+		)
 		.margin(30)
 		.build_cartesian_2d(
 			data.transmit_times[start_at].round() - 1.0
@@ -113,7 +149,10 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>) {
 		.axis_style(&WHITE)
 		.label_style(("sans-serif", 32).into_font().color(&WHITE))
 		.x_desc("Transmit time (s)")
-		.y_desc("Latency (µs)")
+		.y_desc(match mode {
+			PlotMode::Latency => "Latency (µs)",
+			PlotMode::Jitter => "Inter-packet time (µs)",
+		})
 		.draw()
 		.unwrap();
 	chart
