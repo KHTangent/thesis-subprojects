@@ -49,15 +49,18 @@ fn main() {
 fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 	let first_arrival = data.transmit_times[0];
 	for i in 0..data.transmit_times.len() {
+		// Replace the arrival_times vector with an exact latency value. Store in µs instead of s
 		data.arrival_times[i] = (data.arrival_times[i] - data.transmit_times[i]) * 1_000_000.0;
+		// transmit_times are relative to when TRex was started, we want them to start at 0 instead
 		data.transmit_times[i] -= first_arrival;
 	}
-	let filename;
+	let output_file;
 	if args.len() > 3 && args.last().unwrap().ends_with(".png") {
-		filename = args.last().unwrap().clone();
+		output_file = args.last().unwrap().clone();
 	} else {
-		filename = args[2].clone() + ".png";
+		output_file = args[2].clone() + ".png";
 	}
+	// Used for cutting off warmup-time and cooldown-time
 	let start_at;
 	let end_at;
 	if args.len() > 3 && args[3].starts_with('c') {
@@ -69,30 +72,20 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 		start_at = 0;
 		end_at = data.transmit_times.len();
 	}
-	let mut highest_latency = data
-		.arrival_times
+	// Used for creating good values for the axises
+	let mut highest_latency = data.arrival_times[start_at..end_at]
 		.iter()
-		.take(end_at)
-		.skip(start_at)
 		.fold(f64::MIN, |a, b| a.max(*b));
-	let mut lowest_latency = data
-		.arrival_times
+	let mut lowest_latency = data.arrival_times[start_at..end_at]
 		.iter()
-		.take(end_at)
-		.skip(start_at)
 		.fold(f64::MAX, |a, b| a.min(*b));
-	let average_latency: f64 = data
-		.arrival_times
+	// Used for printing stats
+	let average_latency: f64 = data.arrival_times[start_at..end_at]
 		.iter()
-		.take(end_at)
-		.skip(start_at)
 		.fold(0.0, |a, b| a + b)
 		/ data.arrival_times.len() as f64;
-	let variance = data
-		.arrival_times
+	let variance = data.arrival_times[start_at..end_at]
 		.iter()
-		.take(end_at)
-		.skip(start_at)
 		.fold(0.0, |a, b| {
 			&a + (b - average_latency) * (b - average_latency)
 		}) / data.arrival_times.len() as f64;
@@ -104,28 +97,24 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 	println!("Standard deviation is {} µs", &standard_deviation);
 
 	if let PlotMode::Jitter = mode {
-		let mut prev: f64;
-		let mut prev1: f64 = data.arrival_times[0];
+		// Map all values to inter-packet times
+		let mut temp: f64;
+		let mut prev: f64 = data.arrival_times[0];
 		for i in 1..data.arrival_times.len() {
-			prev = data.arrival_times[i].clone();
-			data.arrival_times[i] -= prev1;
-			prev1 = prev;
+			temp = data.arrival_times[i].clone();
+			data.arrival_times[i] -= prev;
+			prev = temp;
 		}
-		highest_latency = data
-			.arrival_times
+		data.arrival_times[0] = 0.0;
+		highest_latency = data.arrival_times[start_at..end_at]
 			.iter()
-			.take(end_at)
-			.skip(start_at)
 			.fold(f64::MIN, |a, b| a.max(*b));
-		lowest_latency = data
-			.arrival_times
+		lowest_latency = data.arrival_times[start_at..end_at]
 			.iter()
-			.take(end_at)
-			.skip(start_at)
 			.fold(f64::MAX, |a, b| a.min(*b));
 	}
 
-	let root = BitMapBackend::new(&filename, (2400, 1600)).into_drawing_area();
+	let root = BitMapBackend::new(&output_file, (2400, 1600)).into_drawing_area();
 	root.fill(&BLACK).unwrap();
 	let mut chart = ChartBuilder::on(&root)
 		.set_label_area_size(LabelAreaPosition::Left, 160)
@@ -139,8 +128,10 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 		)
 		.margin(30)
 		.build_cartesian_2d(
+			// Calculate time bounds for x-axis as whole values
 			data.transmit_times[start_at].round() - 1.0
 				..data.transmit_times[end_at - 1].round() + 1.0,
+			// Expand the range of the y axis a bit
 			(0.9 * lowest_latency)..(1.1 * highest_latency),
 		)
 		.unwrap();
