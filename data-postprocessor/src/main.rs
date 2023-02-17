@@ -1,52 +1,62 @@
-use std::{
-	env, fs,
-	io::{Read, Write},
-	vec,
-};
-
+use clap::{Parser, Subcommand, ValueEnum};
 use plotters::prelude::*;
+use std::{fs, io::Read, vec};
+
+#[derive(Parser)]
+#[command(about)]
+struct Cli {
+	/// Input file from TRex
+	#[arg(short, long)]
+	input_file: String,
+	/// Mode to do
+	#[command(subcommand)]
+	mode: Modes,
+}
+
+#[derive(Subcommand)]
+enum Modes {
+	/// Generate plots
+	Plot {
+		/// What to plot
+		#[arg(short, long)]
+		plot_mode: PlotMode,
+		/// Where to store generated plot
+		#[arg(short, long)]
+		output_file: String,
+		/// Seconds to cut off at the ends of the file
+		#[arg(short, long)]
+		cut: Option<f64>,
+	},
+}
 
 struct TrexData {
 	pub transmit_times: Vec<f64>,
 	pub arrival_times: Vec<f64>,
 }
 
+#[derive(Clone, ValueEnum)]
 enum PlotMode {
 	Latency,
 	Jitter,
 }
 
 fn main() {
-	let args: Vec<_> = env::args().collect();
-	if args.len() < 3 {
-		println!("Please spesify a mode and a filename");
-		println!("Valid modes: sort, plot, plotj");
-		println!("Sort is currently broken");
-		println!("Plot usage: plot/plotj inputfile [c(seconds)] output.png");
-		println!("  plot is used to plot packet latencies, plotj for inter-packet times");
-		println!("  Use c0.5 to cut 0.5 seconds of each side of the plot, to account for warmup/cooldown");
-		return;
-	}
-	let input_file = args[2].clone();
-	println!("Reading {}...", &input_file);
-	let mut data =
-		get_file_timestamps(&input_file).expect(&format!("Failed to read file {}", &input_file));
+	let cli: Cli = Cli::parse();
+	println!("Reading {}...", &cli.input_file);
+	let data = get_file_timestamps(&cli.input_file)
+		.expect(&format!("Failed to read file {}", &cli.input_file));
 	println!("Read {} packet data points", data.transmit_times.len());
-	match args[1].as_str() {
-		"sort" => {
-			mode_sort_data(&mut data, &args);
-		}
-		"plot" => {
-			mode_plot_data(data, &args, PlotMode::Latency);
-		}
-		"plotj" => mode_plot_data(data, &args, PlotMode::Jitter),
-		_ => {
-			println!("Invalid mode option");
-		}
+	match &cli.mode {
+		Modes::Plot { .. } => mode_plot_data(data, cli),
 	}
 }
 
-fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
+fn mode_plot_data(mut data: TrexData, cli: Cli) {
+	let Modes::Plot {
+		plot_mode,
+		output_file,
+		cut,
+	} = cli.mode;
 	let first_arrival = data.transmit_times[0];
 	for i in 0..data.transmit_times.len() {
 		// Replace the arrival_times vector with an exact latency value. Store in µs instead of s
@@ -54,17 +64,13 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 		// transmit_times are relative to when TRex was started, we want them to start at 0 instead
 		data.transmit_times[i] -= first_arrival;
 	}
-	let output_file;
-	if args.len() > 3 && args.last().unwrap().ends_with(".png") {
-		output_file = args.last().unwrap().clone();
-	} else {
-		output_file = args[2].clone() + ".png";
-	}
 	// Used for cutting off warmup-time and cooldown-time
 	let start_at;
 	let end_at;
-	if args.len() > 3 && args[3].starts_with('c') {
-		let a = args[3][1..].parse::<f64>().unwrap_or(0.0);
+	if let Some(a) = cut {
+		if a < 0.0 {
+			panic!("Cut value must be positive");
+		}
 		start_at =
 			(data.transmit_times.len() as f64 * a / data.transmit_times.last().unwrap()) as usize;
 		end_at = data.transmit_times.len() - start_at;
@@ -96,7 +102,7 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 	);
 	println!("Standard deviation is {} µs", &standard_deviation);
 
-	if let PlotMode::Jitter = mode {
+	if let PlotMode::Jitter = plot_mode {
 		// Map all values to inter-packet times
 		let mut temp: f64;
 		let mut prev: f64 = data.arrival_times[0];
@@ -120,7 +126,7 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 		.set_label_area_size(LabelAreaPosition::Left, 160)
 		.set_label_area_size(LabelAreaPosition::Bottom, 100)
 		.caption(
-			match mode {
+			match plot_mode {
 				PlotMode::Latency => "Latencies",
 				PlotMode::Jitter => "Inter-packet times",
 			},
@@ -140,7 +146,7 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 		.axis_style(&WHITE)
 		.label_style(("sans-serif", 32).into_font().color(&WHITE))
 		.x_desc("Transmit time (s)")
-		.y_desc(match mode {
+		.y_desc(match plot_mode {
 			PlotMode::Latency => "Latency (µs)",
 			PlotMode::Jitter => "Inter-packet time (µs)",
 		})
@@ -152,23 +158,6 @@ fn mode_plot_data(mut data: TrexData, args: &Vec<String>, mode: PlotMode) {
 				.map(|i| Pixel::new((data.transmit_times[i], data.arrival_times[i]), &GREEN)),
 		)
 		.unwrap();
-}
-
-fn mode_sort_data(data: &mut TrexData, args: &Vec<String>) {
-	let output_file: String;
-	if args.len() > 3 {
-		output_file = args[3].clone();
-	} else {
-		output_file = args[2].clone() + ".sorted";
-	}
-	println!("Sorting {} packet timestamps...", data.transmit_times.len());
-	// data.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap());
-	println!(
-		"Sorted packets successfully. Writing to {}...",
-		&output_file
-	);
-	write_file_timestamps(&output_file, &data).expect("Failed to write data");
-	println!("Done");
 }
 
 fn get_file_timestamps(filename: &String) -> Option<TrexData> {
@@ -195,13 +184,4 @@ fn get_file_timestamps(filename: &String) -> Option<TrexData> {
 		}
 	}
 	Some(data)
-}
-
-fn write_file_timestamps(filename: &String, data: &TrexData) -> Option<()> {
-	let mut file = fs::File::create(&filename).ok()?;
-	for i in 0..data.transmit_times.len() {
-		file.write_all(&data.transmit_times[i].to_ne_bytes()).ok()?;
-		file.write_all(&data.arrival_times[i].to_ne_bytes()).ok()?;
-	}
-	Some(())
 }
