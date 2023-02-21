@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use plotters::prelude::*;
 use std::{fs, io::Read, vec};
-use utils::vector_avg;
 
 mod utils;
 
@@ -41,7 +40,7 @@ enum Modes {
 	},
 }
 
-struct TrexData {
+pub struct TrexData {
 	pub transmit_times: Vec<f64>,
 	pub arrival_times: Vec<f64>,
 }
@@ -77,13 +76,7 @@ fn mode_plot_data(mut data: TrexData, cli: Cli) {
 		cut,
 	} = cli.mode
 	{
-		let first_arrival = data.transmit_times[0];
-		for i in 0..data.transmit_times.len() {
-			// Replace the arrival_times vector with an exact latency value. Store in µs instead of s
-			data.arrival_times[i] = (data.arrival_times[i] - data.transmit_times[i]) * 1_000_000.0;
-			// transmit_times are relative to when TRex was started, we want them to start at 0 instead
-			data.transmit_times[i] -= first_arrival;
-		}
+		utils::trexdata_to_latency(&mut data);
 		// Used for cutting off warmup-time and cooldown-time
 		let start_at;
 		let end_at;
@@ -99,17 +92,10 @@ fn mode_plot_data(mut data: TrexData, cli: Cli) {
 			end_at = data.transmit_times.len();
 		}
 		// Used for creating good values for the axises
-		let mut highest_latency = data.arrival_times[start_at..end_at]
-			.iter()
-			.fold(f64::MIN, |a, b| a.max(*b));
-		let mut lowest_latency = data.arrival_times[start_at..end_at]
-			.iter()
-			.fold(f64::MAX, |a, b| a.min(*b));
+		let mut highest_latency = utils::vector_max(&data.arrival_times[start_at..end_at]);
+		let mut lowest_latency = utils::vector_min(&data.arrival_times[start_at..end_at]);
 		// Used for printing stats
-		let average_latency: f64 = data.arrival_times[start_at..end_at]
-			.iter()
-			.fold(0.0, |a, b| a + b)
-			/ data.arrival_times.len() as f64;
+		let average_latency: f64 = utils::vector_avg(&data.arrival_times[start_at..end_at]);
 		let variance = data.arrival_times[start_at..end_at]
 			.iter()
 			.fold(0.0, |a, b| {
@@ -132,12 +118,8 @@ fn mode_plot_data(mut data: TrexData, cli: Cli) {
 				prev = temp;
 			}
 			data.arrival_times[0] = 0.0;
-			highest_latency = data.arrival_times[start_at..end_at]
-				.iter()
-				.fold(f64::MIN, |a, b| a.max(*b));
-			lowest_latency = data.arrival_times[start_at..end_at]
-				.iter()
-				.fold(f64::MAX, |a, b| a.min(*b));
+			highest_latency = utils::vector_max(&data.arrival_times[start_at..end_at]);
+			lowest_latency = utils::vector_min(&data.arrival_times[start_at..end_at]);
 		}
 
 		let root = BitMapBackend::new(&output_file, (2400, 1600)).into_drawing_area();
@@ -188,13 +170,7 @@ fn mode_validate(mut data: TrexData, cli: Cli) {
 		cut,
 	} = cli.mode
 	{
-		let first_arrival = data.transmit_times[0];
-		for i in 0..data.transmit_times.len() {
-			// Replace the arrival_times vector with an exact latency value. Store in µs instead of s
-			data.arrival_times[i] = (data.arrival_times[i] - data.transmit_times[i]) * 1_000_000.0;
-			// transmit_times are relative to when TRex was started, we want them to start at 0 instead
-			data.transmit_times[i] -= first_arrival;
-		}
+		utils::trexdata_to_latency(&mut data);
 		// Used for cutting off warmup-time and cooldown-time
 		let start_at;
 		let end_at;
@@ -209,7 +185,7 @@ fn mode_validate(mut data: TrexData, cli: Cli) {
 			start_at = 0;
 			end_at = data.transmit_times.len();
 		}
-		let average_latency: f64 = vector_avg(&data.arrival_times[start_at..end_at]);
+		let average_latency: f64 = utils::vector_avg(&data.arrival_times[start_at..end_at]);
 		// Can finally start looking for anomalies
 		let mut over_treshold = 0;
 		let mut anomalies: Vec<Anomaly> = vec![];
@@ -230,7 +206,8 @@ fn mode_validate(mut data: TrexData, cli: Cli) {
 				// Anomaly not long enough
 				continue;
 			}
-			let anomaly_avg = vector_avg(&data.arrival_times[(i - anomaly_length as usize)..i]);
+			let anomaly_avg =
+				utils::vector_avg(&data.arrival_times[(i - anomaly_length as usize)..i]);
 			anomalies.push(Anomaly {
 				timestamp: data.transmit_times[i - anomaly_length as usize],
 				packets: anomaly_length,
