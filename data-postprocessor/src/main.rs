@@ -37,6 +37,9 @@ enum Modes {
 		/// Seconds to cut off at the ends of the file
 		#[arg(short, long)]
 		cut: Option<f64>,
+		/// Decimals to show for float values
+		#[arg(short, long, default_value_t = 3)]
+		decimals: usize,
 	},
 }
 
@@ -54,7 +57,9 @@ enum PlotMode {
 struct Anomaly {
 	pub timestamp: f64,
 	pub packets: u64,
+	pub minimum_latency: f64,
 	pub average_latency: f64,
+	pub maximum_latency: f64,
 }
 
 fn main() {
@@ -168,6 +173,7 @@ fn mode_validate(mut data: TrexData, cli: Cli) {
 		treshold,
 		n_packets,
 		cut,
+		decimals,
 	} = cli.mode
 	{
 		utils::trexdata_to_latency(&mut data);
@@ -206,12 +212,18 @@ fn mode_validate(mut data: TrexData, cli: Cli) {
 				// Anomaly not long enough
 				continue;
 			}
-			let anomaly_avg =
-				utils::vector_avg(&data.arrival_times[(i - anomaly_length as usize)..i]);
 			anomalies.push(Anomaly {
 				timestamp: data.transmit_times[i - anomaly_length as usize],
 				packets: anomaly_length,
-				average_latency: anomaly_avg,
+				minimum_latency: utils::vector_min(
+					&data.arrival_times[(i - anomaly_length as usize)..i],
+				),
+				average_latency: utils::vector_avg(
+					&data.arrival_times[(i - anomaly_length as usize)..i],
+				),
+				maximum_latency: utils::vector_max(
+					&data.arrival_times[(i - anomaly_length as usize)..i],
+				),
 			});
 		}
 		println!("Average packet latency: {} µs", &average_latency);
@@ -220,8 +232,13 @@ fn mode_validate(mut data: TrexData, cli: Cli) {
 		} else {
 			for anomaly in anomalies {
 				println!(
-					"{}: {} packets, {} µs average",
-					anomaly.timestamp, anomaly.packets, anomaly.average_latency
+					"{:.5$}: {:>6} packets, {:.5$}/{:.5$}/{:.5$} µs min/avg/max",
+					anomaly.timestamp,
+					anomaly.packets,
+					anomaly.minimum_latency,
+					anomaly.average_latency,
+					anomaly.maximum_latency,
+					decimals,
 				);
 			}
 		}
