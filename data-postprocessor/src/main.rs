@@ -3,6 +3,7 @@ use plotters::prelude::*;
 use std::{fs, io::Read, vec};
 
 mod utils;
+mod file_handler;
 
 #[derive(Parser)]
 #[command(about)]
