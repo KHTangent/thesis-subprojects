@@ -2,8 +2,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use plotters::prelude::*;
 use std::{fs, io::Read, vec};
 
-mod utils;
+use crate::file_handler::TrexDataFile;
+
 mod file_handler;
+mod utils;
 
 #[derive(Parser)]
 #[command(about)]
@@ -34,7 +36,7 @@ enum Modes {
 		/// Treshold (in µs) for a packet to be considered out of order
 		treshold: f64,
 		/// Packets in a row requires for them to be considered an anomaly
-		n_packets: u64,
+		n_packets: usize,
 		/// Seconds to cut off at the ends of the file
 		#[arg(short, long)]
 		cut: Option<f64>,
@@ -65,23 +67,23 @@ struct Anomaly {
 
 fn main() {
 	let cli: Cli = Cli::parse();
-	println!("Reading {}...", &cli.input_file);
-	let data = get_file_timestamps(&cli.input_file)
-		.expect(&format!("Failed to read file {}", &cli.input_file));
-	println!("Read {} packet data points", data.transmit_times.len());
 	match &cli.mode {
-		Modes::Plot { .. } => mode_plot_data(data, cli),
-		Modes::Validate { .. } => mode_validate(data, cli),
+		Modes::Plot { .. } => mode_plot_data(cli),
+		Modes::Validate { .. } => mode_validate(cli),
 	}
 }
 
-fn mode_plot_data(mut data: TrexData, cli: Cli) {
+fn mode_plot_data(cli: Cli) {
 	if let Modes::Plot {
 		plot_mode,
 		output_file,
 		cut,
 	} = cli.mode
 	{
+		println!("Reading {}...", &cli.input_file);
+		let mut data = get_file_timestamps(&cli.input_file)
+			.expect(&format!("Failed to read file {}", &cli.input_file));
+		println!("Read {} packet data points", data.transmit_times.len());
 		utils::trexdata_to_latency(&mut data);
 		// Used for cutting off warmup-time and cooldown-time
 		let start_at;
@@ -169,7 +171,7 @@ fn mode_plot_data(mut data: TrexData, cli: Cli) {
 	}
 }
 
-fn mode_validate(mut data: TrexData, cli: Cli) {
+fn mode_validate(cli: Cli) {
 	if let Modes::Validate {
 		treshold,
 		n_packets,
@@ -177,57 +179,63 @@ fn mode_validate(mut data: TrexData, cli: Cli) {
 		decimals,
 	} = cli.mode
 	{
-		utils::trexdata_to_latency(&mut data);
+		let mut data = TrexDataFile::new(&cli.input_file).expect("Failed to read file");
 		// Used for cutting off warmup-time and cooldown-time
-		let start_at;
-		let end_at;
-		if let Some(a) = cut {
-			if a < 0.0 {
-				panic!("Cut value must be positive");
+		let first_point = data.next().expect("Failed to read point data");
+		let last_point = data.get_last_point().expect("Failed to read point data");
+		data.reset().ok();
+		let total_duration = last_point.0 - first_point.0;
+		println!("Reading {} packet data points", data.len());
+		let start_at = match cut {
+			Some(c) => {
+				if c < 0.0 {
+					panic!("Cut value must be positive");
+				}
+				(data.len() as f64 * c / total_duration) as usize
 			}
-			start_at = (data.transmit_times.len() as f64 * a / data.transmit_times.last().unwrap())
-				as usize;
-			end_at = data.transmit_times.len() - start_at;
-		} else {
-			start_at = 0;
-			end_at = data.transmit_times.len();
-		}
-		let average_latency: f64 = utils::vector_avg(&data.arrival_times[start_at..end_at]);
+			None => 0,
+		};
+		let end_at = data.len() - start_at;
 		// Can finally start looking for anomalies
-		let mut over_treshold = 0;
+		let mut anomaly_buffer: Vec<(f64, f64)> = vec![];
 		let mut anomalies: Vec<Anomaly> = vec![];
-		for i in start_at..end_at {
-			if data.arrival_times[i] >= treshold {
-				// Probably part of an anomaly, save when it's over
-				over_treshold += 1;
+		let mut processed = 0;
+		let data_to_use = data
+			.skip(start_at)
+			.take(end_at - start_at)
+			.map(|(transmit, arrival)| (transmit - first_point.0, arrival - first_point.0));
+		for (transmit, arrival) in data_to_use {
+			processed += 1;
+			let latency = (arrival - transmit) * 1_000_000.0;
+			if latency >= treshold {
+				// Probably part of an anomaly, save it for when it's over
+				anomaly_buffer.push((transmit, arrival));
 				continue;
 			}
-			if over_treshold == 0 {
+			if anomaly_buffer.len() == 0 {
 				// Normal packet, and not the end of an anomaly
 				continue;
 			}
 			// If we get here, it's the end of an anomaly. Store it
-			let anomaly_length = over_treshold;
-			over_treshold = 0;
-			if anomaly_length < n_packets {
+			if anomaly_buffer.len() < n_packets {
 				// Anomaly not long enough
+				anomaly_buffer.clear();
 				continue;
 			}
+			let anomaly_latencies = anomaly_buffer
+				.iter()
+				.map(|(transmit, arrival)| (arrival - transmit) * 1_000_000.0)
+				.collect::<Vec<f64>>();
 			anomalies.push(Anomaly {
-				timestamp: data.transmit_times[i - anomaly_length as usize],
-				packets: anomaly_length,
-				minimum_latency: utils::vector_min(
-					&data.arrival_times[(i - anomaly_length as usize)..i],
-				),
-				average_latency: utils::vector_avg(
-					&data.arrival_times[(i - anomaly_length as usize)..i],
-				),
-				maximum_latency: utils::vector_max(
-					&data.arrival_times[(i - anomaly_length as usize)..i],
-				),
+				timestamp: anomaly_buffer[0].0,
+				packets: anomaly_buffer.len() as u64,
+				minimum_latency: utils::vector_min(&anomaly_latencies),
+				average_latency: utils::vector_avg(&anomaly_latencies),
+				maximum_latency: utils::vector_max(&anomaly_latencies),
 			});
+			anomaly_buffer.clear();
 		}
-		println!("Average packet latency: {} µs", &average_latency);
+		println!("Processed {} packets", processed);
 		if anomalies.len() == 0 {
 			println!("No anomalies found!");
 		} else {
