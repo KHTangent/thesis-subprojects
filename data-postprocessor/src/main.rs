@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use plotters::prelude::*;
+use rand::{self, Rng, SeedableRng};
 use std::vec;
 
 use crate::file_handler::TrexDataFile;
@@ -43,6 +44,9 @@ enum Modes {
 		/// Decimals to show for float values
 		#[arg(short, long, default_value_t = 3)]
 		decimals: usize,
+		/// Generate a plot to this file
+		#[arg(short, long)]
+		output_file: Option<String>,
 	},
 }
 
@@ -177,6 +181,7 @@ fn mode_validate(cli: Cli) {
 		n_packets,
 		cut,
 		decimals,
+		output_file,
 	} = cli.mode
 	{
 		let mut data = TrexDataFile::new(&cli.input_file).expect("Failed to read file");
@@ -200,6 +205,9 @@ fn mode_validate(cli: Cli) {
 		let mut anomaly_buffer: Vec<(f64, f64)> = vec![];
 		let mut anomalies: Vec<Anomaly> = vec![];
 		let mut processed = 0;
+		let mut total_latency = 0.0;
+		let mut lowest_latency = f64::INFINITY;
+		let mut highest_latency = f64::NEG_INFINITY;
 		let data_to_use = data
 			.skip(start_at)
 			.take(end_at - start_at)
@@ -207,6 +215,9 @@ fn mode_validate(cli: Cli) {
 		for (transmit, arrival) in data_to_use {
 			processed += 1;
 			let latency = (arrival - transmit) * 1_000_000.0;
+			total_latency += latency;
+			lowest_latency = lowest_latency.min(latency);
+			highest_latency = highest_latency.max(latency);
 			if latency >= treshold {
 				// Probably part of an anomaly, save it for when it's over
 				anomaly_buffer.push((transmit, arrival));
@@ -236,10 +247,11 @@ fn mode_validate(cli: Cli) {
 			anomaly_buffer.clear();
 		}
 		println!("Processed {} packets", processed);
+		let average_latency = total_latency / processed as f64;
 		if anomalies.len() == 0 {
 			println!("No anomalies found!");
 		} else {
-			for anomaly in anomalies {
+			for anomaly in anomalies.iter() {
 				println!(
 					"{:.5$}: {:>6} packets, {:.5$}/{:.5$}/{:.5$} µs min/avg/max",
 					anomaly.timestamp,
@@ -251,5 +263,91 @@ fn mode_validate(cli: Cli) {
 				);
 			}
 		}
+
+		if let Some(output_file) = output_file {
+			let root = BitMapBackend::new(&output_file, (2400, 1600)).into_drawing_area();
+			root.fill(&BLACK).unwrap();
+			let mut chart = ChartBuilder::on(&root)
+				.set_label_area_size(LabelAreaPosition::Left, 160)
+				.set_label_area_size(LabelAreaPosition::Bottom, 100)
+				.caption("Anomaly plot", ("sans-serif", 50).into_font().color(&WHITE))
+				.margin(30)
+				.build_cartesian_2d(
+					// Calculate time bounds for x-axis as whole values
+					cut.unwrap_or(0.0).floor()..(total_duration - cut.unwrap_or(0.0)).ceil(),
+					// Expand the range of the y axis a bit
+					(0.9 * lowest_latency)..(1.1 * highest_latency),
+				)
+				.unwrap();
+			chart
+				.configure_mesh()
+				.axis_style(&WHITE)
+				.label_style(("sans-serif", 32).into_font().color(&WHITE))
+				.x_desc("Transmit time (s)")
+				.y_desc("Latency (µs)")
+				.draw()
+				.unwrap();
+			chart
+				.draw_series([
+					plotters::element::PathElement::new(
+						[
+							(cut.unwrap_or(0.0), average_latency),
+							(total_duration - cut.unwrap_or(0.0), average_latency),
+						],
+						&GREEN,
+					),
+					plotters::element::PathElement::new(
+						[(0.0, treshold), (total_duration, treshold)],
+						&GREEN,
+					),
+				])
+				.unwrap();
+			chart
+				.draw_series([
+					plotters::element::Text::new(
+						"Average latency",
+						(0.0, average_latency + 30.0),
+						("sans-serif", 24).into_font().color(&WHITE),
+					),
+					plotters::element::Text::new(
+						"Anomaly treshold",
+						(0.0, treshold + 4.0),
+						("sans-serif", 24).into_font().color(&WHITE),
+					),
+				])
+				.unwrap();
+			chart
+				.draw_series(anomalies.iter().map(|anomaly| {
+					let color = get_random_color(anomaly.timestamp);
+					let offset = 0.1;
+					plotters::element::PathElement::new(
+						[
+							(anomaly.timestamp - offset, anomaly.minimum_latency),
+							(anomaly.timestamp + offset, anomaly.minimum_latency),
+							(anomaly.timestamp, anomaly.minimum_latency),
+							(anomaly.timestamp, anomaly.average_latency),
+							(anomaly.timestamp - offset, anomaly.average_latency),
+							(anomaly.timestamp + offset, anomaly.average_latency),
+							(anomaly.timestamp, anomaly.average_latency),
+							(anomaly.timestamp, anomaly.maximum_latency),
+							(anomaly.timestamp - offset, anomaly.maximum_latency),
+							(anomaly.timestamp + offset, anomaly.maximum_latency),
+						],
+						&color,
+					)
+				}))
+				.unwrap();
+		} else {
+			println!("No output file specified, will not generate plot");
+		}
 	}
+}
+
+fn get_random_color(seed: f64) -> RGBColor {
+	let mut rng = rand::rngs::SmallRng::seed_from_u64(seed.to_bits());
+	RGBColor(
+		rng.gen_range(0..255),
+		rng.gen_range(0..255),
+		rng.gen_range(0..255),
+	)
 }
