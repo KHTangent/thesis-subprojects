@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use plotters::prelude::*;
-use std::{fs, io::Read, vec};
+use std::vec;
 
 use crate::file_handler::TrexDataFile;
 
@@ -46,11 +46,6 @@ enum Modes {
 	},
 }
 
-pub struct TrexData {
-	pub transmit_times: Vec<f64>,
-	pub arrival_times: Vec<f64>,
-}
-
 #[derive(Clone, ValueEnum)]
 enum PlotMode {
 	Latency,
@@ -80,35 +75,42 @@ fn mode_plot_data(cli: Cli) {
 		cut,
 	} = cli.mode
 	{
-		println!("Reading {}...", &cli.input_file);
-		let mut data = get_file_timestamps(&cli.input_file)
-			.expect(&format!("Failed to read file {}", &cli.input_file));
-		println!("Read {} packet data points", data.transmit_times.len());
-		utils::trexdata_to_latency(&mut data);
+		let mut data = TrexDataFile::new(&cli.input_file).expect("Failed to read file");
 		// Used for cutting off warmup-time and cooldown-time
-		let start_at;
-		let end_at;
-		if let Some(a) = cut {
-			if a < 0.0 {
-				panic!("Cut value must be positive");
+		let first_point = data.next().expect("Failed to read point data");
+		let last_point = data.get_last_point().expect("Failed to read point data");
+		data.reset().ok();
+		let total_duration = last_point.0 - first_point.0;
+		println!(
+			"Reading {} packet data points, test lasted {:.1} seconds",
+			data.len(),
+			total_duration
+		);
+		// Used for cutting off warmup-time and cooldown-time
+		let start_at = match cut {
+			Some(c) => {
+				if c < 0.0 {
+					panic!("Cut value must be positive");
+				}
+				(data.len() as f64 * c / total_duration) as usize
 			}
-			start_at = (data.transmit_times.len() as f64 * a / data.transmit_times.last().unwrap())
-				as usize;
-			end_at = data.transmit_times.len() - start_at;
-		} else {
-			start_at = 0;
-			end_at = data.transmit_times.len();
+			None => 0,
+		};
+		let end_at = data.len() - start_at;
+		let mut arrival_times = Vec::with_capacity(data.len());
+		let mut latencies = Vec::with_capacity(data.len());
+		for (transmit, arrival) in data {
+			arrival_times.push(transmit - first_point.0);
+			latencies.push((arrival - transmit) * 1_000_000.0);
 		}
 		// Used for creating good values for the axises
-		let mut highest_latency = utils::vector_max(&data.arrival_times[start_at..end_at]);
-		let mut lowest_latency = utils::vector_min(&data.arrival_times[start_at..end_at]);
+		let mut highest_latency = utils::vector_max(&latencies[start_at..end_at]);
+		let mut lowest_latency = utils::vector_min(&latencies[start_at..end_at]);
 		// Used for printing stats
-		let average_latency: f64 = utils::vector_avg(&data.arrival_times[start_at..end_at]);
-		let variance = data.arrival_times[start_at..end_at]
-			.iter()
-			.fold(0.0, |a, b| {
-				&a + (b - average_latency) * (b - average_latency)
-			}) / data.arrival_times.len() as f64;
+		let average_latency: f64 = utils::vector_avg(&latencies[start_at..end_at]);
+		let variance = latencies[start_at..end_at].iter().fold(0.0, |a, b| {
+			&a + (b - average_latency) * (b - average_latency)
+		}) / arrival_times.len() as f64;
 		let standard_deviation = variance.sqrt();
 		println!(
 			"Packets range from {} to {} µs, with an average of {} µs",
@@ -119,15 +121,15 @@ fn mode_plot_data(cli: Cli) {
 		if let PlotMode::Jitter = plot_mode {
 			// Map all values to inter-packet times
 			let mut temp: f64;
-			let mut prev: f64 = data.arrival_times[0];
-			for i in 1..data.arrival_times.len() {
-				temp = data.arrival_times[i].clone();
-				data.arrival_times[i] -= prev;
+			let mut prev: f64 = latencies[0];
+			for i in 1..latencies.len() {
+				temp = latencies[i].clone();
+				latencies[i] -= prev;
 				prev = temp;
 			}
-			data.arrival_times[0] = 0.0;
-			highest_latency = utils::vector_max(&data.arrival_times[start_at..end_at]);
-			lowest_latency = utils::vector_min(&data.arrival_times[start_at..end_at]);
+			latencies[0] = 0.0;
+			highest_latency = utils::vector_max(&latencies[start_at..end_at]);
+			lowest_latency = utils::vector_min(&latencies[start_at..end_at]);
 		}
 
 		let root = BitMapBackend::new(&output_file, (2400, 1600)).into_drawing_area();
@@ -145,8 +147,7 @@ fn mode_plot_data(cli: Cli) {
 			.margin(30)
 			.build_cartesian_2d(
 				// Calculate time bounds for x-axis as whole values
-				data.transmit_times[start_at].round() - 1.0
-					..data.transmit_times[end_at - 1].round() + 1.0,
+				arrival_times[start_at].round() - 1.0..arrival_times[end_at - 1].round() + 1.0,
 				// Expand the range of the y axis a bit
 				(0.9 * lowest_latency)..(1.1 * highest_latency),
 			)
@@ -164,8 +165,7 @@ fn mode_plot_data(cli: Cli) {
 			.unwrap();
 		chart
 			.draw_series(
-				(start_at..end_at)
-					.map(|i| Pixel::new((data.transmit_times[i], data.arrival_times[i]), &GREEN)),
+				(start_at..end_at).map(|i| Pixel::new((arrival_times[i], latencies[i]), &GREEN)),
 			)
 			.unwrap();
 	}
@@ -252,30 +252,4 @@ fn mode_validate(cli: Cli) {
 			}
 		}
 	}
-}
-
-fn get_file_timestamps(filename: &String) -> Option<TrexData> {
-	let mut data: TrexData = TrexData {
-		transmit_times: vec![],
-		arrival_times: vec![],
-	};
-	let mut file = fs::File::open(filename).ok()?;
-	const CHUNK_SIZE: usize = 512 * 512;
-	let mut buffer: [u8; CHUNK_SIZE] = [0; CHUNK_SIZE];
-	loop {
-		let bytes_left = std::io::Read::by_ref(&mut file)
-			.take(CHUNK_SIZE.try_into().unwrap())
-			.read(&mut buffer)
-			.ok()?;
-		if bytes_left < 16 {
-			break;
-		}
-		for i in (0..bytes_left).step_by(16) {
-			let transmit_time = f64::from_le_bytes(buffer[i..i + 8].try_into().unwrap());
-			let arrival_time = f64::from_le_bytes(buffer[i + 8..i + 16].try_into().unwrap());
-			data.transmit_times.push(transmit_time);
-			data.arrival_times.push(arrival_time);
-		}
-	}
-	Some(data)
 }
