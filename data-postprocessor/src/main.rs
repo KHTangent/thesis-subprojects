@@ -3,7 +3,7 @@ use plotters::prelude::*;
 use rand::{self, Rng, SeedableRng};
 use std::vec;
 
-use crate::file_handler::TrexDataFile;
+use crate::{file_handler::TrexDataFile, utils::Tally};
 
 mod file_handler;
 mod utils;
@@ -58,10 +58,7 @@ enum PlotMode {
 
 struct Anomaly {
 	pub timestamp: f64,
-	pub packets: u64,
-	pub minimum_latency: f64,
-	pub average_latency: f64,
-	pub maximum_latency: f64,
+	pub tally: Tally,
 }
 
 fn main() {
@@ -103,37 +100,33 @@ fn mode_plot_data(cli: Cli) {
 		let end_at = data.len() - start_at;
 		let mut arrival_times = Vec::with_capacity(data.len());
 		let mut latencies = Vec::with_capacity(data.len());
+		let mut tally = Tally::new();
 		for (transmit, arrival) in data {
 			arrival_times.push(transmit - first_point.0);
-			latencies.push((arrival - transmit) * 1_000_000.0);
+			let latency_us = (arrival - transmit) * 1_000_000.0;
+			latencies.push(latency_us);
+			tally.add(latency_us);
 		}
-		// Used for creating good values for the axises
-		let mut highest_latency = utils::vector_max(&latencies[start_at..end_at]);
-		let mut lowest_latency = utils::vector_min(&latencies[start_at..end_at]);
 		// Used for printing stats
-		let average_latency: f64 = utils::vector_avg(&latencies[start_at..end_at]);
-		let variance = latencies[start_at..end_at].iter().fold(0.0, |a, b| {
-			&a + (b - average_latency) * (b - average_latency)
-		}) / arrival_times.len() as f64;
-		let standard_deviation = variance.sqrt();
+		let average_latency = tally.avg();
 		println!(
 			"Packets range from {} to {} µs, with an average of {} µs",
-			&lowest_latency, &highest_latency, &average_latency
+			&tally.min, &tally.max, &average_latency
 		);
-		println!("Standard deviation is {} µs", &standard_deviation);
+		println!("Standard deviation is {} µs", &tally.stddev());
 
 		if let PlotMode::Jitter = plot_mode {
 			// Map all values to inter-packet times
 			let mut temp: f64;
 			let mut prev: f64 = latencies[0];
+			tally = Tally::new();
 			for i in 1..latencies.len() {
 				temp = latencies[i].clone();
 				latencies[i] -= prev;
 				prev = temp;
+				tally.add(latencies[i]);
 			}
 			latencies[0] = 0.0;
-			highest_latency = utils::vector_max(&latencies[start_at..end_at]);
-			lowest_latency = utils::vector_min(&latencies[start_at..end_at]);
 		}
 
 		let root = BitMapBackend::new(&output_file, (2400, 1600)).into_drawing_area();
@@ -153,7 +146,7 @@ fn mode_plot_data(cli: Cli) {
 				// Calculate time bounds for x-axis as whole values
 				arrival_times[start_at].round() - 1.0..arrival_times[end_at - 1].round() + 1.0,
 				// Expand the range of the y axis a bit
-				(0.9 * lowest_latency)..(1.1 * highest_latency),
+				(0.9 * tally.min)..(1.1 * tally.max),
 			)
 			.unwrap();
 		chart
@@ -205,9 +198,7 @@ fn mode_validate(cli: Cli) {
 		let mut anomaly_buffer: Vec<(f64, f64)> = vec![];
 		let mut anomalies: Vec<Anomaly> = vec![];
 		let mut processed = 0;
-		let mut total_latency = 0.0;
-		let mut lowest_latency = f64::INFINITY;
-		let mut highest_latency = f64::NEG_INFINITY;
+		let mut total_tally = Tally::new();
 		let data_to_use = data
 			.skip(start_at)
 			.take(end_at - start_at)
@@ -215,9 +206,7 @@ fn mode_validate(cli: Cli) {
 		for (transmit, arrival) in data_to_use {
 			processed += 1;
 			let latency = (arrival - transmit) * 1_000_000.0;
-			total_latency += latency;
-			lowest_latency = lowest_latency.min(latency);
-			highest_latency = highest_latency.max(latency);
+			total_tally.add(latency);
 			if latency >= treshold {
 				// Probably part of an anomaly, save it for when it's over
 				anomaly_buffer.push((transmit, arrival));
@@ -233,21 +222,19 @@ fn mode_validate(cli: Cli) {
 				anomaly_buffer.clear();
 				continue;
 			}
-			let anomaly_latencies = anomaly_buffer
+			let mut anomaly_tally = Tally::new();
+			anomaly_buffer
 				.iter()
 				.map(|(transmit, arrival)| (arrival - transmit) * 1_000_000.0)
-				.collect::<Vec<f64>>();
+				.for_each(|v| anomaly_tally.add(v));
 			anomalies.push(Anomaly {
 				timestamp: anomaly_buffer[0].0,
-				packets: anomaly_buffer.len() as u64,
-				minimum_latency: utils::vector_min(&anomaly_latencies),
-				average_latency: utils::vector_avg(&anomaly_latencies),
-				maximum_latency: utils::vector_max(&anomaly_latencies),
+				tally: anomaly_tally,
 			});
 			anomaly_buffer.clear();
 		}
 		println!("Processed {} packets", processed);
-		let average_latency = total_latency / processed as f64;
+		let average_latency = total_tally.avg();
 		if anomalies.len() == 0 {
 			println!("No anomalies found!");
 		} else {
@@ -255,10 +242,10 @@ fn mode_validate(cli: Cli) {
 				println!(
 					"{:.5$}: {:>6} packets, {:.5$}/{:.5$}/{:.5$} µs min/avg/max",
 					anomaly.timestamp,
-					anomaly.packets,
-					anomaly.minimum_latency,
-					anomaly.average_latency,
-					anomaly.maximum_latency,
+					anomaly.tally.count,
+					anomaly.tally.min,
+					anomaly.tally.avg(),
+					anomaly.tally.max,
 					decimals,
 				);
 			}
@@ -276,7 +263,7 @@ fn mode_validate(cli: Cli) {
 					// Calculate time bounds for x-axis as whole values
 					cut.unwrap_or(0.0).floor()..(total_duration - cut.unwrap_or(0.0)).ceil(),
 					// Expand the range of the y axis a bit
-					(0.9 * lowest_latency)..(1.1 * highest_latency),
+					(0.9 * total_tally.min)..(1.1 * total_tally.max),
 				)
 				.unwrap();
 			chart
@@ -320,18 +307,19 @@ fn mode_validate(cli: Cli) {
 				.draw_series(anomalies.iter().map(|anomaly| {
 					let color = get_random_color(anomaly.timestamp);
 					let offset = 0.1;
+					let avg = anomaly.tally.avg();
 					plotters::element::PathElement::new(
 						[
-							(anomaly.timestamp - offset, anomaly.minimum_latency),
-							(anomaly.timestamp + offset, anomaly.minimum_latency),
-							(anomaly.timestamp, anomaly.minimum_latency),
-							(anomaly.timestamp, anomaly.average_latency),
-							(anomaly.timestamp - offset, anomaly.average_latency),
-							(anomaly.timestamp + offset, anomaly.average_latency),
-							(anomaly.timestamp, anomaly.average_latency),
-							(anomaly.timestamp, anomaly.maximum_latency),
-							(anomaly.timestamp - offset, anomaly.maximum_latency),
-							(anomaly.timestamp + offset, anomaly.maximum_latency),
+							(anomaly.timestamp - offset, anomaly.tally.min),
+							(anomaly.timestamp + offset, anomaly.tally.min),
+							(anomaly.timestamp, anomaly.tally.min),
+							(anomaly.timestamp, avg),
+							(anomaly.timestamp - offset, avg),
+							(anomaly.timestamp + offset, avg),
+							(anomaly.timestamp, avg),
+							(anomaly.timestamp, anomaly.tally.max),
+							(anomaly.timestamp - offset, anomaly.tally.max),
+							(anomaly.timestamp + offset, anomaly.tally.max),
 						],
 						&color,
 					)

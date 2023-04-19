@@ -1,11 +1,36 @@
-pub fn vector_avg(v: &[f64]) -> f64 {
-	v.iter().fold(0.0, |a, b| a + b) / v.len() as f64
+pub struct Tally {
+	pub count: usize,
+	pub sum: f64,
+	pub ssum: f64,
+	pub min: f64,
+	pub max: f64,
 }
 
-pub fn vector_max(v: &[f64]) -> f64 {
-	v.iter().fold(f64::MIN, |a, b| a.max(*b))
-}
+impl Tally {
+	pub fn new() -> Tally {
+		Tally {
+			count: 0,
+			sum: 0.0,
+			ssum: 0.0,
+			min: f64::MAX,
+			max: f64::MIN,
+		}
+	}
 
-pub fn vector_min(v: &[f64]) -> f64 {
-	v.iter().fold(f64::MAX, |a, b| a.min(*b))
+	pub fn add(&mut self, v: f64) {
+		self.count += 1;
+		self.sum += v;
+		self.ssum += v * v;
+		self.min = self.min.min(v);
+		self.max = self.max.max(v);
+	}
+
+	pub fn avg(&self) -> f64 {
+		self.sum / self.count as f64
+	}
+
+	pub fn stddev(&self) -> f64 {
+		let avg = self.avg();
+		(self.ssum / self.count as f64 - avg * avg).sqrt()
+	}
 }
