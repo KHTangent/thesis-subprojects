@@ -293,7 +293,7 @@ fn mode_validate(cli: Cli) {
 				.draw_series([
 					plotters::element::Text::new(
 						"Average latency",
-						(0.0, average_latency + 30.0),
+						(0.0, average_latency + 60.0),
 						("sans-serif", 24).into_font().color(&WHITE),
 					),
 					plotters::element::Text::new(
@@ -303,23 +303,26 @@ fn mode_validate(cli: Cli) {
 					),
 				])
 				.unwrap();
+			// How wide the lines marking endpoints and averages on anomalies should be
+			// Spesified as a part of the X axis, so make it dependent on the total duration
+			let marker_lines_width =
+				((total_duration - cut.unwrap_or(0.0)).ceil() - cut.unwrap_or(0.0).floor()) * 0.002;
 			chart
 				.draw_series(anomalies.iter().map(|anomaly| {
 					let color = get_random_color(anomaly.timestamp);
-					let offset = 0.1;
 					let avg = anomaly.tally.avg();
 					plotters::element::PathElement::new(
 						[
-							(anomaly.timestamp - offset, anomaly.tally.min),
-							(anomaly.timestamp + offset, anomaly.tally.min),
+							(anomaly.timestamp - marker_lines_width, anomaly.tally.min),
+							(anomaly.timestamp + marker_lines_width, anomaly.tally.min),
 							(anomaly.timestamp, anomaly.tally.min),
 							(anomaly.timestamp, avg),
-							(anomaly.timestamp - offset, avg),
-							(anomaly.timestamp + offset, avg),
+							(anomaly.timestamp - marker_lines_width, avg),
+							(anomaly.timestamp + marker_lines_width, avg),
 							(anomaly.timestamp, avg),
 							(anomaly.timestamp, anomaly.tally.max),
-							(anomaly.timestamp - offset, anomaly.tally.max),
-							(anomaly.timestamp + offset, anomaly.tally.max),
+							(anomaly.timestamp - marker_lines_width, anomaly.tally.max),
+							(anomaly.timestamp + marker_lines_width, anomaly.tally.max),
 						],
 						&color,
 					)
