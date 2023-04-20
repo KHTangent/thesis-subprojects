@@ -55,6 +55,9 @@ enum Modes {
 		/// Generate a plot to this file
 		#[arg(short, long)]
 		output_file: Option<String>,
+		/// Only print summary
+		#[arg(long, default_value_t = false)]
+		summary_only: bool,
 	},
 }
 
@@ -184,6 +187,7 @@ fn mode_validate(cli: Cli) {
 		cut,
 		decimals,
 		output_file,
+		summary_only,
 	} = cli.mode
 	{
 		let mut data = TrexDataFile::new(&cli.input_file).expect("Failed to read file");
@@ -192,7 +196,9 @@ fn mode_validate(cli: Cli) {
 		let last_point = data.get_last_point().expect("Failed to read point data");
 		data.reset().ok();
 		let total_duration = last_point.0 - first_point.0;
-		println!("Reading {} packet data points", data.len());
+		if !summary_only {
+			println!("Reading {} packet data points", data.len());
+		}
 		let start_at = match cut {
 			Some(c) => {
 				if c < 0.0 {
@@ -258,19 +264,21 @@ fn mode_validate(cli: Cli) {
 			anomaly_buffer.clear();
 		}
 		let average_latency = total_tally.avg();
-		if anomalies.len() == 0 {
-			println!("No anomalies found!");
-		} else {
-			for anomaly in anomalies.iter() {
-				println!(
-					"{:.5$}: {:>6} packets, {:.5$}/{:.5$}/{:.5$} µs min/avg/max",
-					anomaly.timestamp,
-					anomaly.tally.count,
-					anomaly.tally.min,
-					anomaly.tally.avg(),
-					anomaly.tally.max,
-					decimals,
-				);
+		if !summary_only {
+			if anomalies.len() == 0 {
+				println!("No anomalies found!");
+			} else {
+				for anomaly in anomalies.iter() {
+					println!(
+						"{:.5$}: {:>6} packets, {:.5$}/{:.5$}/{:.5$} µs min/avg/max",
+						anomaly.timestamp,
+						anomaly.tally.count,
+						anomaly.tally.min,
+						anomaly.tally.avg(),
+						anomaly.tally.max,
+						decimals,
+					);
+				}
 			}
 		}
 		println!("===== Summary =====");
@@ -285,26 +293,32 @@ fn mode_validate(cli: Cli) {
 			total_tally.stddev(),
 			decimals
 		);
+		println!(
+			"Anomaly treshold: {:.2$} µs, n >= {}",
+			anomaly_treshold, n_packets, decimals
+		);
 		println!("Total anomalies: {}", anomalies.len());
-		println!(
-			"Average anomaly duration: {:.1$} packets",
-			anomaly_summary_packets.avg(),
-			decimals
-		);
-		println!(
-			"Anomaly average latency (min/avg/max): {:.3$}/{:.3$}/{:.3$} µs",
-			anomaly_summary_avg.min,
-			anomaly_summary_avg.avg(),
-			anomaly_summary_avg.max,
-			decimals
-		);
-		println!(
-			"Anomaly maximum latency (min/avg/max): {:.3$}/{:.3$}/{:.3$} µs",
-			anomaly_summary_max.min,
-			anomaly_summary_max.avg(),
-			anomaly_summary_max.max,
-			decimals
-		);
+		if anomalies.len() > 0 {
+			println!(
+				"Average anomaly duration: {:.1$} packets",
+				anomaly_summary_packets.avg(),
+				decimals
+			);
+			println!(
+				"Anomaly average latency (min/avg/max): {:.3$}/{:.3$}/{:.3$} µs",
+				anomaly_summary_avg.min,
+				anomaly_summary_avg.avg(),
+				anomaly_summary_avg.max,
+				decimals
+			);
+			println!(
+				"Anomaly maximum latency (min/avg/max): {:.3$}/{:.3$}/{:.3$} µs",
+				anomaly_summary_max.min,
+				anomaly_summary_max.avg(),
+				anomaly_summary_max.max,
+				decimals
+			);
+		}
 
 		if let Some(output_file) = output_file {
 			let root = BitMapBackend::new(&output_file, (2400, 1600)).into_drawing_area();
@@ -386,7 +400,7 @@ fn mode_validate(cli: Cli) {
 					)
 				}))
 				.unwrap();
-		} else {
+		} else if !summary_only {
 			println!("No output file specified, will not generate plot");
 		}
 	}
