@@ -217,14 +217,15 @@ fn mode_validate(cli: Cli) {
 		// Can finally start looking for anomalies
 		let mut anomaly_buffer: Vec<(f64, f64)> = vec![];
 		let mut anomalies: Vec<Anomaly> = vec![];
-		let mut processed = 0;
 		let mut total_tally = Tally::new();
+		let mut anomaly_summary_packets = Tally::new();
+		let mut anomaly_summary_max = Tally::new();
+		let mut anomaly_summary_avg = Tally::new();
 		let data_to_use = data
 			.skip(start_at)
 			.take(end_at - start_at)
 			.map(|(transmit, arrival)| (transmit - first_point.0, arrival - first_point.0));
 		for (transmit, arrival) in data_to_use {
-			processed += 1;
 			let latency = (arrival - transmit) * 1_000_000.0;
 			total_tally.add(latency);
 			if latency >= anomaly_treshold {
@@ -236,7 +237,7 @@ fn mode_validate(cli: Cli) {
 				// Normal packet, and not the end of an anomaly
 				continue;
 			}
-			// If we get here, it's the end of an anomaly. Store it
+			// If we get here, it's the end of an anomaly. Store it if it's long enough
 			if anomaly_buffer.len() < n_packets {
 				// Anomaly not long enough
 				anomaly_buffer.clear();
@@ -247,13 +248,15 @@ fn mode_validate(cli: Cli) {
 				.iter()
 				.map(|(transmit, arrival)| (arrival - transmit) * 1_000_000.0)
 				.for_each(|v| anomaly_tally.add(v));
+			anomaly_summary_packets.add(anomaly_tally.count as f64);
+			anomaly_summary_avg.add(anomaly_tally.avg());
+			anomaly_summary_max.add(anomaly_tally.max);
 			anomalies.push(Anomaly {
 				timestamp: anomaly_buffer[0].0,
 				tally: anomaly_tally,
 			});
 			anomaly_buffer.clear();
 		}
-		println!("Processed {} packets", processed);
 		let average_latency = total_tally.avg();
 		if anomalies.len() == 0 {
 			println!("No anomalies found!");
@@ -270,6 +273,38 @@ fn mode_validate(cli: Cli) {
 				);
 			}
 		}
+		println!("===== Summary =====");
+		println!("Total duration: {:.1$} s", total_duration, decimals);
+		println!("Total packets: {:.1$}", total_tally.count, decimals);
+		println!(
+			"Latency (min/avg/max): {:.3$}/{:.3$}/{:.3$} µs",
+			total_tally.min, average_latency, total_tally.max, decimals
+		);
+		println!(
+			"Standard deviation: {:.1$} µs",
+			total_tally.stddev(),
+			decimals
+		);
+		println!("Total anomalies: {}", anomalies.len());
+		println!(
+			"Average anomaly duration: {:.1$} packets",
+			anomaly_summary_packets.avg(),
+			decimals
+		);
+		println!(
+			"Anomaly average latency (min/avg/max): {:.3$}/{:.3$}/{:.3$} µs",
+			anomaly_summary_avg.min,
+			anomaly_summary_avg.avg(),
+			anomaly_summary_avg.max,
+			decimals
+		);
+		println!(
+			"Anomaly maximum latency (min/avg/max): {:.3$}/{:.3$}/{:.3$} µs",
+			anomaly_summary_max.min,
+			anomaly_summary_max.avg(),
+			anomaly_summary_max.max,
+			decimals
+		);
 
 		if let Some(output_file) = output_file {
 			let root = BitMapBackend::new(&output_file, (2400, 1600)).into_drawing_area();
