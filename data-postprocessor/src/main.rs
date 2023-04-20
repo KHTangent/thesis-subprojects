@@ -34,15 +34,23 @@ enum Modes {
 	},
 	/// Test the suitability for real-time applications
 	Validate {
-		/// Treshold (in µs) for a packet to be considered out of order
+		/// Treshold (in µs) for a packet to be considered out of order. Set to -1 to infer
+		/// from data. Ignored if -A is given
+		#[arg(short, long, default_value_t = 500.0)]
 		treshold: f64,
 		/// Packets in a row requires for them to be considered an anomaly
+		#[arg(short, long, default_value_t = 2)]
 		n_packets: usize,
+		/// Maximum deviation from average latency to be considered an anomaly. Slower than
+		/// -t, since it must read the whole file twice.
+		/// Overrides -t
+		#[arg(short, long)]
+		deviation: Option<f64>,
 		/// Seconds to cut off at the ends of the file
 		#[arg(short, long)]
 		cut: Option<f64>,
 		/// Decimals to show for float values
-		#[arg(short, long, default_value_t = 3)]
+		#[arg(long, default_value_t = 3)]
 		decimals: usize,
 		/// Generate a plot to this file
 		#[arg(short, long)]
@@ -172,6 +180,7 @@ fn mode_validate(cli: Cli) {
 	if let Modes::Validate {
 		treshold,
 		n_packets,
+		deviation,
 		cut,
 		decimals,
 		output_file,
@@ -194,6 +203,17 @@ fn mode_validate(cli: Cli) {
 			None => 0,
 		};
 		let end_at = data.len() - start_at;
+		let anomaly_treshold = match deviation {
+			Some(d) => {
+				let data = TrexDataFile::new(&cli.input_file).expect("Failed to read file");
+				let mut tally = Tally::new();
+				data.skip(start_at)
+					.take(end_at - start_at)
+					.for_each(|(t, a)| tally.add((a - t) * 1_000_000.0));
+				tally.avg() * (1.0 + d / 100.0)
+			}
+			None => treshold,
+		};
 		// Can finally start looking for anomalies
 		let mut anomaly_buffer: Vec<(f64, f64)> = vec![];
 		let mut anomalies: Vec<Anomaly> = vec![];
@@ -207,7 +227,7 @@ fn mode_validate(cli: Cli) {
 			processed += 1;
 			let latency = (arrival - transmit) * 1_000_000.0;
 			total_tally.add(latency);
-			if latency >= treshold {
+			if latency >= anomaly_treshold {
 				// Probably part of an anomaly, save it for when it's over
 				anomaly_buffer.push((transmit, arrival));
 				continue;
@@ -284,7 +304,10 @@ fn mode_validate(cli: Cli) {
 						&GREEN,
 					),
 					plotters::element::PathElement::new(
-						[(0.0, treshold), (total_duration, treshold)],
+						[
+							(cut.unwrap_or(0.0), anomaly_treshold),
+							(total_duration - cut.unwrap_or(0.0), anomaly_treshold),
+						],
 						&GREEN,
 					),
 				])
@@ -293,12 +316,12 @@ fn mode_validate(cli: Cli) {
 				.draw_series([
 					plotters::element::Text::new(
 						"Average latency",
-						(0.0, average_latency + 60.0),
+						(cut.unwrap_or(0.0), average_latency),
 						("sans-serif", 24).into_font().color(&WHITE),
 					),
 					plotters::element::Text::new(
 						"Anomaly treshold",
-						(0.0, treshold + 4.0),
+						(cut.unwrap_or(0.0), anomaly_treshold),
 						("sans-serif", 24).into_font().color(&WHITE),
 					),
 				])
