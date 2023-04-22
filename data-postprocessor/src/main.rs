@@ -282,7 +282,11 @@ fn mode_validate(cli: Cli) {
 			}
 		}
 		println!("===== Summary =====");
-		println!("Total duration: {:.1$} s", total_duration, decimals);
+		println!(
+			"Total duration: {:.1$} s",
+			total_duration - 2.0 * cut.unwrap_or(0.0),
+			decimals
+		);
 		println!("Total packets: {:.1$}", total_tally.count, decimals);
 		println!(
 			"Latency (min/avg/max): {:.3$}/{:.3$}/{:.3$} µs",
