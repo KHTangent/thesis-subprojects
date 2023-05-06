@@ -8,7 +8,8 @@ This script is undocumented and not very readable, and should probably not be us
 import os
 import re
 
-input_path = "~/Development/thesis-subprojects/data/Testplots2/"
+input_path = "../data/Testplots2/"
+pps_values = [1900, 19000, 190000, 1700000]
 
 
 def parse_test(testname: str):
@@ -99,21 +100,21 @@ def main():
     parsed = {}
     for test in tests:
         parsed[test] = parse_test(test)
-    for i in [1900, 19000, 190000, 1700000]:
+    for i in pps_values:
         print("PPS: " + str(i))
         print(
             tests_to_csv(
                 parsed,
                 i,
                 15,
-                lambda x: x["packet_loss"],
+                # lambda x: x["packet_loss"],
                 # lambda x: x["standard_deviation"],
                 # lambda x: x["latency"][1],
                 # lambda x: x["latency"][2],
-                # lambda x: x["anomaly_latency_max"][1] if x["anomaly_count"] > 0 else 0,
+                lambda x: x["anomaly_latency_max"][1] if x["anomaly_count"] > 0 else 0,
                 # lambda x: x["anomaly_latency_avg"][1] if x["anomaly_count"] > 0 else 0,
                 # lambda x: x["anomaly_duration_avg"] if x["anomaly_count"] > 0 else 0,
-                False,
+                True,
             )
         )
         print()
