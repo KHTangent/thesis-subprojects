@@ -8,8 +8,21 @@ from math import sqrt
 import matplotlib.pyplot as plt
 import parseTestSummaries as pts
 
-plotting_value = lambda e: e["latency"][1]
 plotting_pps = 190000
+# plotting_value = lambda e: e["anomaly_count"]
+# plot_title = "Anomaly count of 190k PPS tests"
+# plot_xlabel = "Anomaly count"
+def plotting_value(e): return e["latency"][1]
+
+
+plot_title = "Average latency of 190k PPS tests"
+plot_xlabel = "Average latency (µs)"
+logarithmic = True
+# logarithmic = True
+include_error = True
+
+color_options = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
+
 
 def extract_data(tests: list, pps: int, val: callable):
     data = []
@@ -18,7 +31,8 @@ def extract_data(tests: list, pps: int, val: callable):
             data.append(val(test))
     return data
 
-def main(): 
+
+def main():
     tests = os.listdir(pts.input_path)
     datas = []
     for test in tests:
@@ -29,20 +43,27 @@ def main():
         datas.append({
             "name": map_name(test),
             "avg": avg,
-            "err": sd / sqrt(len(data))
+            "err": sd / 2  # Divide by 2 since Matplotlib uses ±error
         })
-    datas.sort(key=lambda e: e["avg"])
+    # datas.sort(key=lambda e: e["avg"])
+    datas.sort(key=lambda e: e["name"])
     names = list(map(lambda e: e["name"], datas))
     averages = list(map(lambda e: e["avg"], datas))
     errors = list(map(lambda e: e["err"], datas))
+    colors = [color_options[i // 6] for i in range(24)]
     plt.rcdefaults()
     fig, ax = plt.subplots()
     ypos = list(range(len(names)))
-    ax.barh(ypos, averages, xerr=errors, align='center')
+    if include_error:
+        ax.barh(ypos, averages, xerr=errors, align='center', color=colors)
+    else:
+        ax.barh(ypos, averages, align='center', color=colors)
     ax.set_yticks(ypos, labels=names)
+    if logarithmic:
+        ax.set_xscale('log')
     ax.invert_yaxis()
-    ax.set_xlabel("Latency (ms)")
-    ax.set_title(f"Latency of {plotting_pps} PPS tests")
+    ax.set_xlabel(plot_xlabel)
+    ax.set_title(plot_title)
     plt.show()
 
 
@@ -98,7 +119,6 @@ def map_name(name: str) -> str:
         return "stock-threaded-double-idle"
     else:
         raise Exception("Unknown test name: " + name)
-
 
 
 if __name__ == "__main__":
