@@ -8,7 +8,7 @@ This script is undocumented and not very readable, and should probably not be us
 import os
 import re
 
-input_path = "../data/PlotsN2T500/"
+input_path = "../data/PlotsN2T750/"
 pps_values = [1900, 19000, 190000, 1700000]
 
 

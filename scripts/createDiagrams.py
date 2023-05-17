@@ -4,21 +4,24 @@ This script is even more specific than the other one, and should probably not be
 """
 
 import os
+from sys import argv
 from math import sqrt
 import matplotlib.pyplot as plt
 import parseTestSummaries as pts
 
 plotting_pps = 190000
-# plotting_value = lambda e: e["anomaly_count"]
-# plot_title = "Anomaly count of 190k PPS tests"
-# plot_xlabel = "Anomaly count"
-def plotting_value(e): return e["latency"][1]
+
+# def plotting_value(
+#     e): return e["anomaly_latency_avg"][1] if e["anomaly_count"] > 0 else 0
+# plot_title = "Average anomaly severity of 190k PPS tests"
+# plot_xlabel = "Average anomaly packet latency (µs)"
 
 
-plot_title = "Average latency of 190k PPS tests"
-plot_xlabel = "Average latency (µs)"
-logarithmic = True
-# logarithmic = True
+def plotting_value(e):
+    return e["anomaly_count"]
+plot_title = "Anomaly count of 190 kpps tests, n=2, t=750µs"
+plot_xlabel = "Anomaly count"
+logarithmic = False
 include_error = True
 
 color_options = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
@@ -49,13 +52,17 @@ def main():
     datas.sort(key=lambda e: e["name"])
     names = list(map(lambda e: e["name"], datas))
     averages = list(map(lambda e: e["avg"], datas))
-    errors = list(map(lambda e: e["err"], datas))
+    errors_up = list(map(lambda e: e["err"], datas))
+    errors_down = []
+    for i in range(len(errors_up)):
+        errors_down.append(min(averages[i], errors_up[i]))
     colors = [color_options[i // 6] for i in range(24)]
     plt.rcdefaults()
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(17, 10))
     ypos = list(range(len(names)))
     if include_error:
-        ax.barh(ypos, averages, xerr=errors, align='center', color=colors)
+        ax.barh(ypos, averages, xerr=(errors_down, errors_up),
+                align='center', color=colors)
     else:
         ax.barh(ypos, averages, align='center', color=colors)
     ax.set_yticks(ypos, labels=names)
@@ -64,7 +71,10 @@ def main():
     ax.invert_yaxis()
     ax.set_xlabel(plot_xlabel)
     ax.set_title(plot_title)
-    plt.show()
+    if len(argv) > 1:
+        plt.savefig(argv[1], dpi=150)
+    else:
+        plt.show()
 
 
 def map_name(name: str) -> str:
