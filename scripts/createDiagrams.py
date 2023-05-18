@@ -9,18 +9,17 @@ from math import sqrt
 import matplotlib.pyplot as plt
 import parseTestSummaries as pts
 
-plotting_pps = 190000
-
-# def plotting_value(
-#     e): return e["anomaly_latency_avg"][1] if e["anomaly_count"] > 0 else 0
-# plot_title = "Average anomaly severity of 190k PPS tests"
-# plot_xlabel = "Average anomaly packet latency (µs)"
-
 
 def plotting_value(e):
-    return e["anomaly_count"]
-plot_title = "Anomaly count of 190 kpps tests, n=2, t=750µs"
-plot_xlabel = "Anomaly count"
+    if e["anomaly_count"] == 0:
+        return None
+    else:
+        return e["anomaly_duration_avg"]
+
+
+plotting_pps = 1900
+plot_title = "Average anomaly duration of 1900 pps tests, n=2, t=250µs"
+plot_xlabel = "Average anomaly duration (packets)"
 logarithmic = False
 include_error = True
 
@@ -31,7 +30,9 @@ def extract_data(tests: list, pps: int, val: callable):
     data = []
     for test in tests:
         if test["pps"] == pps:
-            data.append(val(test))
+            v = val(test)
+            if v is not None:
+                data.append(val(test))
     return data
 
 
@@ -41,6 +42,13 @@ def main():
     for test in tests:
         parsed = pts.parse_test(test)
         data = extract_data(parsed, plotting_pps, plotting_value)
+        if len(data) == 0:
+            datas.append({
+                "name": map_name(test),
+                "avg": 0,
+                "err": 0
+            })
+            continue
         avg = sum(data) / len(data)
         sd = sqrt(sum(map(lambda e: (e - avg)**2, data)) / len(data))
         datas.append({
