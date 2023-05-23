@@ -36,6 +36,22 @@ def extract_data(tests: list, pps: int, val: callable):
     return data
 
 
+t_criticals_0025 = [
+    12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+    2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
+    2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042
+]
+
+
+def get_confidence_interval(data: list):
+    if len(data) < 2:
+        return 0
+    avg = sum(data) / len(data)
+    ssd = sqrt(sum(map(lambda e: (e - avg)**2, data)) / (len(data) - 1))
+    t_critical = t_criticals_0025[len(data) - 2]
+    return t_critical * ssd / sqrt(len(data))
+
+
 def main():
     tests = os.listdir(pts.input_path)
     datas = []
@@ -50,11 +66,10 @@ def main():
             })
             continue
         avg = sum(data) / len(data)
-        sd = sqrt(sum(map(lambda e: (e - avg)**2, data)) / len(data))
         datas.append({
             "name": map_name(test),
             "avg": avg,
-            "err": sd / 2  # Divide by 2 since Matplotlib uses ±error
+            "err": get_confidence_interval(data)
         })
     # datas.sort(key=lambda e: e["avg"])
     datas.sort(key=lambda e: e["name"])
