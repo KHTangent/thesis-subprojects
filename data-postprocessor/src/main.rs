@@ -20,42 +20,45 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Modes {
-	/// Generate plots
+	/// Generate plots of individual packets
 	Plot {
 		/// What to plot
 		#[arg(short, long)]
 		plot_mode: PlotMode,
-		/// Where to store generated plot
+		/// PNG file to use for output
 		#[arg(short, long)]
 		output_file: String,
 		/// Seconds to cut off at the ends of the file
 		#[arg(short, long)]
 		cut: Option<f64>,
 	},
-	/// Test the suitability for real-time applications
+	/// Test for latency anomalies, and optionally generate a plot of them
 	Validate {
-		/// Treshold (in µs) for a packet to be considered out of order. Set to -1 to infer
-		/// from data. Ignored if -A is given
+		/// Treshold (in µs) for a packet to be considered out of order.
+		/// Ignored if -d is given
 		#[arg(short, long, default_value_t = 500.0)]
 		treshold: f64,
-		/// Packets in a row requires for them to be considered an anomaly
+		/// Consecutive packets required for them to be considered an anomaly
 		#[arg(short, long, default_value_t = 2)]
 		n_packets: usize,
-		/// Maximum deviation from average latency to be considered an anomaly. Slower than
-		/// -t, since it must read the whole file twice.
-		/// Overrides -t
+		/// Maximum deviation from average latency to be considered an anomaly. 
+		/// For example, a value of 3 means that a packet with latency 3 times the average 
+		/// latency is considered part of an anomaly.
+		/// Slower than -t, since the file must be read twice to obtain the average.
 		#[arg(short, long)]
 		deviation: Option<f64>,
-		/// Seconds to cut off at the ends of the file
+		/// Seconds to cut off at the ends of the file, to avoid warmup and cooldown deviations
 		#[arg(short, long)]
 		cut: Option<f64>,
-		/// Decimals to show for float values
+		/// Decimals to print for float values
 		#[arg(long, default_value_t = 3)]
 		decimals: usize,
-		/// Generate a plot to this file
+		/// Generate an anomaly plot to this PNG file.
+		/// If omitted, plot generation is skipped.
 		#[arg(short, long)]
 		output_file: Option<String>,
-		/// Only print summary
+		/// By default, the program will list all anomalies. Set this option to only print a 
+		/// summary of the anomalies.
 		#[arg(long, default_value_t = false)]
 		summary_only: bool,
 	},
@@ -63,7 +66,9 @@ enum Modes {
 
 #[derive(Clone, ValueEnum)]
 enum PlotMode {
+	/// Plot latency in µs
 	Latency,
+	/// Plot time since last packet in µs
 	Jitter,
 }
 
