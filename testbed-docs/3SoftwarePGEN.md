@@ -29,19 +29,19 @@ These are the steps needed for creating the traffic generator for the first time
       0000:01:00.1 'Ethernet Controller X710 for 10GBASE-T' if=enp1s0f1 ...
       ```
       In our case, we want to use the Intel X710 interfaces, which here have ID's 
-	  `01:00.0` and `01:00.1`
-   3. Create a TRex configuration file somewhere, with the following contents. Replace the
-      port ID's with the ones you found in the previous step.
-      ```yaml
-      - port_limit: 2
-        version: 2
-        interfaces: ["01:00.0", "01:00.1"] # Replace if needed
-        port_info:
-          - ip         : 11.11.11.2
-            default_gw : 11.11.11.1
-          - ip         : 12.12.12.2
-            default_gw : 12.12.12.1
-      ```
+      `01:00.0` and `01:00.1`
+6. Create a TRex configuration file somewhere, with the following contents. Replace the
+   port ID's with the ones you found in the previous step.
+   ```yaml
+   - port_limit: 2
+     version: 2
+     interfaces: ["01:00.0", "01:00.1"] # Replace if needed
+     port_info:
+       - ip         : 11.11.11.2
+         default_gw : 11.11.11.1
+       - ip         : 12.12.12.2
+         default_gw : 12.12.12.1
+   ```
 
 TRex is now installed and ready to use. 
 
